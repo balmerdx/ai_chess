@@ -31,7 +31,7 @@ def export_own_games(directory: Path, destination: Path) -> int:
                 continue
             if game.board().fen() != chess.Board().fen():
                 continue
-            if game.headers.get("Termination") in {"engine_failure", "aborted", "ply_limit", "unterminated"}:
+            if game.headers.get("Termination") in {"engine_failure", "aborted", "duration_limit", "ply_limit", "unterminated", "startup_failure"}:
                 continue
             result = game.headers.get("Result", "*")
             if result not in {"1-0", "0-1", "1/2-1/2"}:

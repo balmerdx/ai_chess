@@ -49,6 +49,8 @@ class Engine:
                     raise ValueError("Движок не поддерживает BookFile/OwnBook")
                 self.send(f"setoption name BookFile value {Path(settings.book).resolve()}")
                 self.send("setoption name OwnBook value true")
+            elif "ownbook" in self.options:
+                self.send("setoption name OwnBook value false")
             self.ready()
         except BaseException:
             self.close()
@@ -106,6 +108,8 @@ class Engine:
 
     @staticmethod
     def info(line, board):
+        if line == "info string book move":
+            return {"book": True}
         tokens = line.split()
         data = {}
         index = 1
@@ -145,6 +149,7 @@ class Engine:
         return data
 
     def play(self, board, settings, game_id):
+        started = time.monotonic()
         if game_id != self.game_id:
             self.send("ucinewgame")
             self.ready()
@@ -174,6 +179,7 @@ class Engine:
                         ponder = chess.Move.from_uci(tokens[3])
                     except ValueError:
                         pass
+                info["elapsed"] = time.monotonic() - started
                 return chess.engine.PlayResult(move, ponder, info)
 
     def stop(self):

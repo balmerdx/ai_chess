@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +25,12 @@ class Settings:
     max_plies: int = 400
     book: str | None = None
     seed: int = 1
+    white_book: str | None = None
+    black_book: str | None = None
+
+    def for_side(self, color):
+        override = self.white_book if color else self.black_book
+        return replace(self, book=self.book if override is None else override)
 
     def validate(self) -> None:
         if self.seconds is not None and not 0 < self.seconds <= 86400:
@@ -56,6 +62,8 @@ class Game:
         self.finished = False
         self.reason = ""
         self.last_info = ""
+        self.book_hits = {chess.WHITE: 0, chess.BLACK: 0}
+        self.book_seconds = {chess.WHITE: 0.0, chess.BLACK: 0.0}
         self.id = uuid.uuid4().hex
         now = datetime.now().astimezone()
         self.path = settings.log_dir / f"{now:%Y%m%d_%H%M%S_%f}_{self.id[:8]}.pgn"
@@ -75,7 +83,8 @@ class Game:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             for color, path in ((chess.WHITE, self.settings.white), (chess.BLACK, self.settings.black)):
                 if path:
-                    engine = Engine(path, self.settings, self.path.with_suffix(".stderr.log"), "white" if color else "black")
+                    side_settings = self.settings.for_side(color)
+                    engine = Engine(path, side_settings, self.path.with_suffix(".stderr.log"), "white" if color else "black")
                     with self.lock:
                         if self.interrupted.is_set():
                             engine.close()
@@ -84,6 +93,7 @@ class Game:
                     key = "White" if color else "Black"
                     self.record.headers[key] = engine.name
                     self.record.headers[key + "Engine"] = str(Path(path).resolve())
+                    self.record.headers[key + "Book"] = str(Path(side_settings.book).resolve()) if side_settings.book else "off"
             self.started = True
             self.save()
         except BaseException:
@@ -115,6 +125,9 @@ class Game:
             return
         self.finished = True
         self.reason = reason
+        for color, key in ((chess.WHITE, "White"), (chess.BLACK, "Black")):
+            self.record.headers[key + "BookHits"] = str(self.book_hits[color])
+            self.record.headers[key + "BookSeconds"] = f"{self.book_seconds[color]:.6f}"
         self.record.headers.update(Result=result, Termination=reason, EndedAt=datetime.now().astimezone().isoformat())
         if diagnostic:
             with self.path.with_suffix(".stderr.log").open("a", encoding="utf-8") as stream:
@@ -155,6 +168,9 @@ class Game:
                 raise ValueError("Движок не вернул ход в незавершённой позиции")
             if result.move not in self.board.legal_moves:
                 raise ValueError(f"Движок вернул нелегальный ход: {result.move.uci()}")
+            if result.info.get("book"):
+                self.book_hits[side] += 1
+                self.book_seconds[side] += result.info.get("elapsed", 0.0)
             score = result.info.get("score")
             self.last_info = f"Глубина: {result.info.get('depth', '?')}  Оценка: {score.white() if score else '?'}"
         except (chess.engine.EngineError, TimeoutError, ValueError, OSError) as error:

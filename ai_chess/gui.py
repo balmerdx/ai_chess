@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from .game import Game, Settings
+from .book_defaults import default_book
 from .logs import read_games
 from .qt_runtime import ensure_gui_runtime
 
@@ -230,6 +231,7 @@ class Window(QMainWindow):
         self.delay.setValue(0.3)
         form.addRow("Задержка показа, с", self.delay)
         self.book = QLineEdit()
+        self.book.setText(default_book(engine) or "")
         self.book.setPlaceholderText("Необязательно: путь к книге")
         form.addRow("Дебютная книга", self.book)
         self.seed = QSpinBox()
