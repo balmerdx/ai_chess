@@ -1,0 +1,38 @@
+# Build and packaging artifacts
+/build/
+/dist/
+*.egg-info/
+*.o
+*.a
+
+# Generated games/books; keep AI session documentation
+/logs/*
+!/logs/ai/
+/logs/ai/*
+!/logs/ai/*.md
+/books/
+
+# Local Python runtime and caches
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environment data and credentials
+/.agents/
+/.aws/
+/.codex/
+.env
+.env.*
+
+# Crash dumps and editor temporary files
+core
+core.[0-9]*
+*.core
+*.swp
+*.swo
+.DS_Store
