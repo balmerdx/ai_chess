@@ -1,0 +1,52 @@
+{
+  "elapsed_seconds": 2672.464042485997,
+  "games": 644,
+  "plies": 51552,
+  "reasons": {
+    "checkmate": 635,
+    "threefold_repetition": 8,
+    "duration_limit": 1
+  },
+  "results": {
+    "1-0": 313,
+    "0-1": 322,
+    "1/2-1/2": 8,
+    "*": 1
+  },
+  "unique_games": 45,
+  "unique_openings": 16,
+  "technical_errors": 0,
+  "nonempty_stderr": [],
+  "comparison": {
+    "complete_pairs": 321,
+    "games": 642,
+    "excluded_games": 2,
+    "wins": 633,
+    "draws": 8,
+    "losses": 1,
+    "by_color": {
+      "white": {
+        "games": 321,
+        "score": 0.9844236760124611
+      },
+      "black": {
+        "games": 321,
+        "score": 1.0
+      }
+    },
+    "score": 0.9922118380062306,
+    "paired_bootstrap_95": [
+      0.9867601246105919,
+      0.9968847352024922
+    ],
+    "unique_games": 44,
+    "hoeffding_lower_95": 0.9239018852373964,
+    "confirmed_improvement": true,
+    "interpretation": "Улучшение подтверждено в условиях этого эксперимента"
+  },
+  "book_usage": {
+    "hits": 3862,
+    "elapsed_seconds": 2.824260007182602,
+    "nominal_saved_seconds": 190.27573999281742
+  }
+}

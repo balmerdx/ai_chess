@@ -56,6 +56,7 @@ class Game:
         self.node = self.record
         self.san: list[str] = []
         self.engines: dict[chess.Color, Engine] = {}
+        self.helpers: list[Engine] = []
         self.lock = threading.Lock()
         self.interrupted = threading.Event()
         self.started = False
@@ -100,15 +101,28 @@ class Game:
             self.interrupt()
             raise
 
+    def add_helper(self, engine):
+        """Register analysis processes with the same cancellation lifecycle."""
+        with self.lock:
+            if self.interrupted.is_set():
+                engine.close()
+                engine.wait_closed()
+                raise InterruptedError("Запуск отменён")
+            self.helpers.append(engine)
+
     def interrupt(self):
         self.interrupted.set()
         with self.lock:
             for engine in self.engines.values():
                 engine.close()
+            for engine in self.helpers:
+                engine.close()
 
     def close(self):
         self.interrupt()
         for engine in self.engines.values():
+            engine.wait_closed()
+        for engine in self.helpers:
             engine.wait_closed()
 
     def save(self):

@@ -39,6 +39,11 @@ def main():
     train.add_argument("--seed", type=int, default=731)
     train.add_argument("--logs", type=Path, required=True)
     train.add_argument("--output", type=Path, required=True)
+    train.add_argument("--adaptive", action="store_true", help="Обновлять выбор дебютов после каждой партии")
+    train.add_argument("--opening-plies", type=int, default=12)
+    train.add_argument("--opening-top", type=int, default=8)
+    train.add_argument("--history", type=Path, help="Каталог прежнего учебного прогона того же движка")
+    train.add_argument("--opponent", help="Фиксированный соперник без книги; исследует только кандидат")
     compare = sub.add_parser("compare-book", help="Парный матч книги против сохранённого исходного движка")
     compare.add_argument("--engine", default=DEFAULT_ENGINE)
     compare.add_argument("--baseline", required=True)
@@ -74,9 +79,12 @@ def main():
         from .experiments import build_training_book, run_series
         try:
             if args.command == "train-book":
-                settings = Settings(args.engine, args.engine, args.time, log_dir=args.logs,
+                settings = Settings(args.engine, args.opponent or args.engine, args.time, log_dir=args.logs,
                                     max_plies=args.max_plies, seed=args.seed)
-                summary = run_series(settings, duration=args.duration, training=True)
+                summary = run_series(settings, duration=args.duration, training=True,
+                                     adaptive=args.adaptive or bool(args.opponent), opening_plies=args.opening_plies,
+                                     opening_top=args.opening_top, history=args.history,
+                                     fixed_opponent=bool(args.opponent))
                 build_training_book(summary, args.logs, args.output, args.builder)
             elif args.command == "compare-book":
                 settings = Settings(args.engine, args.baseline, args.time, log_dir=args.logs,

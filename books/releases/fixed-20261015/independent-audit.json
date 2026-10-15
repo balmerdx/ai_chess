@@ -1,0 +1,47 @@
+{
+  "audit_complete": true,
+  "stages": {
+    "training": {
+      "games": 1923,
+      "technical_errors": 0,
+      "all_pgn_verified": true
+    },
+    "selection-depth4": {
+      "games": 175,
+      "technical_errors": 0,
+      "all_pgn_verified": true
+    },
+    "selection-depth12": {
+      "games": 225,
+      "technical_errors": 0,
+      "all_pgn_verified": true
+    },
+    "comparison": {
+      "games": 644,
+      "technical_errors": 0,
+      "all_pgn_verified": true
+    }
+  },
+  "source_hashes_unchanged": true,
+  "binary_hashes_unchanged": true,
+  "candidate_only_statistics_exact": true,
+  "books_exact": {
+    "4": {
+      "positions": 12,
+      "moves": 15,
+      "sha256": "c25899298f8b0c3655fe0ec22392bdeba5d7c0e543dca2d1bf948eeeb45ebc18"
+    },
+    "12": {
+      "positions": 33,
+      "moves": 50,
+      "sha256": "37e7eb0f3bc26b75d0f7a3df4c72a10829825b75fb9b444b8e7e349c80c8f040"
+    }
+  },
+  "total_games": 2967,
+  "total_plies": 253453,
+  "training_finished": 1922,
+  "loss_switches": 196,
+  "finished_loss_switches": 196,
+  "remaining_engine_processes": [],
+  "audited_at_utc": "2026-10-15T03:12:32.965800+00:00"
+}

@@ -10,7 +10,8 @@
 !/logs/ai/
 /logs/ai/*
 !/logs/ai/*.md
-/books/
+/books/*
+!/books/releases/
 
 # Local Python runtime and caches
 /.venv/

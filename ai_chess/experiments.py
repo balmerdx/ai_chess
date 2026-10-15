@@ -17,6 +17,8 @@ import chess.engine
 
 from .game import Game, Settings
 from .logs import export_own_games, read_games
+from .opening_learning import OpeningLearner, opening_candidates, opening_diversity
+from .uci import Engine
 
 
 def write_json(path: Path, value):
@@ -32,20 +34,14 @@ def fingerprint(path):
 
 def choose_opening(scored, rng):
     """Keep at most three near-best moves; never mix different mate outcomes."""
-    ranked = sorted(scored, key=lambda item: (-item[1], item[0].uci()))
-    if not ranked:
-        raise ValueError('Нет оценённых дебютных ходов')
-    best = ranked[0][1]
-    candidates = [move for move, score in ranked
-                  if (score == best if abs(best) >= 90000 else best - score <= 50)][:3]
-    return rng.choice(candidates)
+    return rng.choice(opening_candidates(scored, top=3))
 
 
-def explore(game: Game, rng, deadline):
+def explore(game: Game, rng, deadline, learner=None, analysis_engine=None):
     """Score child positions using our own search, then accept a seeded choice."""
     scored = []
     board = game.board
-    engine = game.engines[board.turn]
+    engine = analysis_engine if analysis_engine is not None else game.engines[board.turn]
     analysis = replace(game.settings, seconds=None, depth=3, book=None)
     for move in sorted(board.legal_moves, key=lambda m: m.uci()):
         if game.interrupted.is_set() or time.monotonic() >= deadline:
@@ -63,9 +59,14 @@ def explore(game: Game, rng, deadline):
             value = score.pov(board.turn).score(mate_score=100000)
         scored.append((move, value))
     if not game.interrupted.is_set() and time.monotonic() < deadline:
-        move = choose_opening(scored, rng)
+        reason = 'random'
+        if learner is None:
+            move = choose_opening(scored, rng)
+        else:
+            move, reason = learner.choose(board, opening_candidates(scored, learner.top), rng)
         game.accept(move)
-        game.node.comment = 'Opening exploration: own search, depth 3, top 3 within 50 cp'
+        game.node.comment = (f'Opening exploration: own search, depth 3, top '
+                             f'{learner.top if learner else 3} within 50 cp; {reason}')
         game.save()
 
 
@@ -129,8 +130,17 @@ def paired_result(rows, samples=10000):
 
 
 def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
-               training=False, comparison=False):
+               training=False, comparison=False, adaptive=False, opening_plies=12,
+               opening_top=8, history=None, fixed_opponent=False):
     settings.validate()
+    if (adaptive and (not training or comparison)) or (history and not adaptive):
+        raise ValueError('Адаптация и история доступны только для обучения')
+    learner = OpeningLearner(plies=opening_plies, top=opening_top) if adaptive else None
+    if fixed_opponent and (not adaptive or history):
+        raise ValueError('Фиксированный соперник требует адаптивного обучения без истории само­игры')
+    if adaptive and ((not fixed_opponent and settings.white != settings.black) or not settings.white or not settings.black or
+                     any(settings.for_side(side).book for side in (True, False))):
+        raise ValueError('Адаптивное обучение требует одинаковых движков без готовой книги')
     if duration is not None and (not math.isfinite(duration) or duration <= 0):
         raise ValueError('Длительность должна быть конечной и положительной')
     if games is not None and games < 1:
@@ -142,13 +152,21 @@ def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
     summary_path = directory / 'summary.json'
     if summary_path.exists() or any(directory.glob('*.pgn')):
         raise ValueError(f'Для воспроизводимости требуется новый каталог партий: {directory}')
+    history_info = None
+    if history:
+        history_info = learner.import_history(history, fingerprint(settings.white), settings.seconds,
+                                              directory / 'history-games.txt')
     started = time.monotonic()
     deadline = started + duration if duration is not None else math.inf
     rows = []
     manifest = dict(duration_seconds=duration, games_limit=games, seconds_per_move=settings.seconds,
                     depth=settings.depth, max_plies=settings.max_plies, seed=settings.seed,
                     training=training, comparison=comparison,
-                    exploration=dict(plies=4, depth=3, top=3, tolerance_cp=50) if training else None,
+                    fixed_opponent=fixed_opponent,
+                    exploration=dict(plies=opening_plies if adaptive else 4, depth=3,
+                                     top=opening_top if adaptive else 3, tolerance_cp=50,
+                                     adaptive=adaptive, exploration_bonus=.35 if adaptive else None) if training else None,
+                    history=history_info,
                     participants={})
     for color, path in [('white', settings.white), ('black', settings.black)]:
         side = settings.for_side(color == 'white')
@@ -156,10 +174,12 @@ def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
             sha256=fingerprint(path) if path else None, book=str(Path(side.book).resolve()) if side.book else None,
             book_sha256=fingerprint(side.book) if side.book else None)
     write_json(directory / 'manifest.json', manifest)
+    if learner:
+        write_json(directory / 'learning.json', learner.snapshot())
     index = 0
     while time.monotonic() < deadline and (games is None or index < games):
         swapped = alternate and index % 2 == 1
-        seed = (settings.seed + (index // 2 if comparison else index)) % 2147483648
+        seed = (settings.seed + (index // 2 if comparison or fixed_opponent else index)) % 2147483648
         current = replace(settings, seed=seed)
         if swapped:
             current = replace(current, white=settings.black, black=settings.white,
@@ -170,15 +190,24 @@ def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
             timer.daemon = True
             timer.start()
         startup_error = None
+        teacher = None
         try:
             game.start()
             game.record.headers.update(Round=str(index+1), Experiment='training' if training else 'comparison' if comparison else 'match',
                                        Pair=str(index // 2 + 1), CandidateColor='black' if swapped else 'white')
+            if fixed_opponent:
+                game.record.headers['FixedOpponentTraining'] = 'true'
+                teacher = Engine(settings.white, replace(current, book=None, white_book=None, black_book=None),
+                                 game.path.with_suffix('.analysis.stderr.log'), 'analysis')
+                game.add_helper(teacher)
             rng = random.Random(seed)
+            if learner:
+                learner.trace = []
             while not game.finished and not game.interrupted.is_set() and time.monotonic() < deadline:
-                if training and game.board.ply() < 4:
+                if (training and game.board.ply() < (opening_plies if adaptive else 4)
+                        and (not fixed_opponent or game.board.turn == (not swapped))):
                     try:
-                        explore(game, rng, deadline)
+                        explore(game, rng, deadline, learner, teacher)
                     except (chess.engine.EngineError, TimeoutError, ValueError, OSError) as error:
                         if not game.interrupted.is_set():
                             game.finish('0-1' if game.board.turn else '1-0', 'engine_failure', str(error))
@@ -213,16 +242,28 @@ def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
         else:
             break
         rows.append(row)
+        if learner and game.started:
+            verified = list(read_games(game.path))
+            if len(verified) != 1:
+                raise ValueError('Ожидалась одна партия для обновления статистики')
+            learner.learn(verified[0], candidate_only=fixed_opponent)
+            write_json(directory / 'learning.json', learner.snapshot())
         print(json.dumps(row, ensure_ascii=False), flush=True)
         write_json(directory / 'progress.json', dict(elapsed_seconds=time.monotonic()-started, rows=rows))
         index += 1
-        if startup_error:
+        if startup_error or ((adaptive or comparison) and row['reason'] == 'engine_failure'):
             break
     summary = dict(elapsed_seconds=time.monotonic()-started, games=len(rows), plies=sum(r['plies'] for r in rows),
                    reasons=dict(Counter(r['reason'] for r in rows)), results=dict(Counter(r['result'] for r in rows)), rows=rows)
     summary.update(audit_rows(rows))
     summary['technical_errors'] = sum(r['reason'] in {'engine_failure', 'startup_failure'} for r in rows)
     summary['nonempty_stderr'] = [str(p) for p in directory.glob('*.stderr.log') if p.stat().st_size]
+    if learner:
+        summary['adaptive'] = dict(plies=opening_plies, top=opening_top, history=history_info,
+                                   fixed_opponent=fixed_opponent,
+                                   history_games=learner.history_games, switches=learner.switches,
+                                   statistics=str((directory / 'learning.json').resolve()))
+        summary['diversity'] = opening_diversity(rows)
     if comparison:
         summary['comparison'] = paired_result(rows)
         hits = sum(sum(r.get('book_hits', {}).values()) for r in rows)
@@ -233,16 +274,27 @@ def run_series(settings: Settings, *, duration=None, games=None, alternate=True,
     return summary
 
 
-def build_training_book(summary, directory: Path, output: Path, builder):
+def build_training_book(summary, directory: Path, output: Path, builder, *, min_games=6):
     if summary['technical_errors']:
         raise ValueError('Сбор завершился техническими ошибками; исправьте их до построения книги')
     export = directory / 'own-games.txt'
-    count = export_own_games(directory, export)
+    adaptive = summary.get('adaptive')
+    count = export_own_games(directory, export, candidate_only=bool(adaptive and adaptive.get('fixed_opponent')))
+    if adaptive and adaptive.get('history'):
+        source = adaptive['history']
+        if fingerprint(source['export']) != source['sha256']:
+            raise ValueError('История изменилась после обучения')
+        historical = Path(source['export']).read_text(encoding='utf-8').splitlines()[1:]
+        export.write_text('AI_CHESS_OWN_GAMES 1\n' + '\n'.join(historical + export.read_text().splitlines()[1:]) + '\n', encoding='utf-8')
+        count += len(historical)
     if not count:
         raise ValueError('Нет подходящих законченных партий: книга не построена')
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + '.tmp')
-    result = subprocess.run([str(Path(builder).resolve()), str(export), str(temporary)],
+    command = [str(Path(builder).resolve()), str(export), str(temporary)]
+    if adaptive:
+        command += ['--max-plies', str(adaptive['plies']), '--min-games', str(min_games), '--score-margin', '0.05']
+    result = subprocess.run(command,
                             check=True, text=True, capture_output=True)
     lines = temporary.read_text().splitlines()
     if not lines or lines[0] != 'AI_CHESS_BOOK 1' or len(lines) == 1:
